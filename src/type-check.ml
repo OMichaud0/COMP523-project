@@ -91,8 +91,8 @@ let rec type_check (theta : basis) (gamma : sorting) (input_process : process) :
   end
 (* RCV *) | Reception (k,x,p) -> (* TODO: *)
   begin
-    let sort_x = Var x in
-    let gamma_prime = gamma @ (x,sort_x) in
+    let sort_x : sort = Var x in
+    let gamma_prime = gamma @ [(x,sort_x)] in
     let delta_prime = type_check theta gamma_prime p in
     let alpha = match List.assoc_opt k delta_prime with
     | Some a -> a
