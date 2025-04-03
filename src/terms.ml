@@ -9,7 +9,6 @@ type var = string
 type const =
   | Int of int
   | Bool of bool
-  | Name of name
 
 type proc_var =
   | Name of name
