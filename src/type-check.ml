@@ -22,10 +22,24 @@ let intersect (t1 : typing) (t2: typing) : channel list =
   let s2 = ChannelSet.of_list d2 in
   ChannelSet.to_list (ChannelSet.inter s1 s2)
 
+let different (t1 : typing) (t2 : typing) : channel list =
+  let (d1,_) = List.split t1 in
+  let (d2,_) = List.split t2 in
+  let s1 = ChannelSet.of_list d1 in
+  let s2 = ChannelSet.of_list d2 in
+  ChannelSet.to_list (ChannelSet.diff s1 s2)
+
 let is_compatible (t1 : typing) (t2 : typing) : bool =
   let intersection = intersect t1 t2 in
   let f = fun acc x -> acc && (cotype (List.assoc x t1) (List.assoc x t2)) in
   List.fold_left f true intersection
+
+let compose (t1 : typing) (t2 : typing) : typing =
+  let intersection = intersect t1 t2 in
+  let d1 = different t1 t2 in
+  let d2 = different t2 t1 in
+  (List.map (fun c -> (c,Closed)) intersection) @ (List.map (fun k -> (k,List.assoc k t1)) d1) @ (List.map (fun k -> (k,List.assoc k t2)) d2)
+
 
 let rec sort_check (gamma : sorting) (e : expr) : sort =
   match e with
@@ -51,7 +65,7 @@ let rec type_check (theta : basis) (gamma : sorting) (input_process : process) :
         end
       | None -> raise TypeError
   end
-(* ACC *)  | Accept (a,k,p) -> (* TODO: potentially add check with alpha *)
+(* ACC *)  | Accept (a,k,p) ->
   begin
     match (List.find_opt (fun (s1,_) -> (compare s1 a) == 0) gamma) with
       | Some (a,a_type) -> 
@@ -75,6 +89,21 @@ let rec type_check (theta : basis) (gamma : sorting) (input_process : process) :
     in
     (List.filter (fun (k_prime,_) -> (compare k k_prime) == 0) delta_prime) @ [(k,Send(e_s,alpha))]
   end
+(* RCV *) | Reception (k,x,p) -> (* TODO: *)
+  begin
+    let sort_x = Var x in
+    let gamma_prime = gamma @ (x,sort_x) in
+    let delta_prime = type_check theta gamma_prime p in
+    let alpha = match List.assoc_opt k delta_prime with
+    | Some a -> a
+    | None -> Closed
+    in
+    (List.filter (fun (k_prime,_) -> (compare k k_prime) == 0) delta_prime) @ [(k,Reception(sort_x,alpha))]
+  end
+(* CONC *) | Composition (p,q) ->
+    let deltap = type_check theta gamma p in
+    let deltaq = type_check theta gamma q in
+    if is_compatible deltap deltaq then compose deltap deltaq else raise TypeError
   | _ -> raise TypeError
 
   (* (match type_check theta gamma with ->
