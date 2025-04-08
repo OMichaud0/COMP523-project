@@ -23,8 +23,8 @@ type process =
   | Accept of name * channel * process
   | Send of channel * expr * process
   | Reception of channel * var * process
-  | Branch of channel * label * process
-  | Selection of channel * ((label * process) list)
+  | Branch of channel * ((label * process) list)
+  | Selection of channel * label * process
   | Throw of channel * channel * process
   | Catch of channel * channel * process
   | Conditional of expr * process * process
