@@ -227,7 +227,8 @@ let rec gen_sortings (input_process : process) : sorting * typing =
               | None -> (k, Branch_t [(l, k_type)])
             end
           in
-          let new_t = List.map type_extend_fct t_prime
+          let intermediate_t = List.map type_extend_fct t_prime in
+          let new_t = intermediate_t @ (List.filter (fun (k,_) -> not (List.mem_assoc k intermediate_t)) t)
           in (new_s, new_t)
         end
         (* (let s, t = gen_sortings p in (combine_sortings acc s), (l,t)) in *)
