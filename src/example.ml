@@ -24,8 +24,14 @@ let (user : process) = Request ("a", "k", Send ("k", Cst (Int 42), Selection ("k
 
 let (p : process) = Composition (bank, Composition (atm, user))
 
-let s, _ = gen_sortings p
+let scoped_p, s, t = gen_sortings p
 
-let a = List.assoc "a" s
+(* let a = List.assoc "a" s *)
 
-let Pair_s (a_accept,a_request) = a
+(* let Pair_s (a_accept,a_request) = a *)
+
+let (example_user : process) = Request ("a", "k", Reception ("k", "x", Inact))
+
+let (example_server : process) = Accept ("a", "k", Send ("k", Cst (Int 5), Inact))
+
+(* let example_sorting, _ = gen_sortings (Composition (example_user, example_server)) *)

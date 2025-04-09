@@ -20,6 +20,25 @@ type basis = (proc_var * ((sort list) * (typ list))) list (* \Theta *)(* TODO: c
 
 type typing = (channel * typ) list (* \Delta *)
 
+type scoped_process = 
+  | Scoped_Request of name * channel * scoped_process
+  | Scoped_Accept of name * channel * scoped_process
+  | Scoped_Send of channel * expr * scoped_process
+  | Scoped_Reception of channel * var * scoped_process
+  | Scoped_Branch of channel * ((label * scoped_process) list)
+  | Scoped_Selection of channel * label * scoped_process
+  | Scoped_Throw of channel * channel * scoped_process
+  | Scoped_Catch of channel * channel * scoped_process
+  | Scoped_Conditional of expr * scoped_process * scoped_process
+  | Scoped_Composition of scoped_process * scoped_process
+  | Scoped_Inact
+  | Scoped_Hide of proc_var * scoped_process
+  | Scoped_Rec of scoped_def_rec * scoped_process
+  | Scoped_Proc_Var of proc_var * expr * channel
+  | Scoped_composition of sorting * scoped_process * scoped_process
+and scoped_rec_atom = proc_var * var * channel * scoped_process
+and scoped_def_rec = scoped_rec_atom list (* do we need to account for empty lists? *)
+
 exception TypeError
 
 let intersect (t1 : typing) (t2: typing) : channel list =
@@ -139,7 +158,7 @@ let construct_pair_s (s1 : sort) (s2 : sort) : sort =
   | Pair_s (Unkown_t,request), Pair_s (accept,Unkown_t) -> Pair_s(accept,request)
   | _, _ -> raise TypeError
 
-let compose_sortings (s1 : sorting) (s2 : sorting) : sorting =
+let compose_sortings (s1 : sorting) (s2 : sorting) : sorting * sorting =
   let (d1,_) = List.split s1 in
   let (d2,_) = List.split s2 in
   let names1 = StringSet.of_list d1 in
@@ -148,8 +167,8 @@ let compose_sortings (s1 : sorting) (s2 : sorting) : sorting =
   let single2 = StringSet.diff names2 names1 in
   let common = StringSet.inter names1 names2 in
   (List.map (fun a -> (a,List.assoc a s1)) (StringSet.to_list single1)) 
-  @ (List.map (fun a -> (a,construct_pair_s (List.assoc a s1) (List.assoc a s2))) (StringSet.to_list common)) 
-  @ (List.map (fun a -> (a,List.assoc a s2)) (StringSet.to_list single2))
+  @ (List.map (fun a -> (a,List.assoc a s2)) (StringSet.to_list single2)), 
+  (List.map (fun a -> (a,construct_pair_s (List.assoc a s1) (List.assoc a s2))) (StringSet.to_list common)) 
 
 let compose_typings (t1 : typing) (t2 : typing) : typing =
   let (d1,_) = List.split t1 in
@@ -163,54 +182,54 @@ let compose_typings (t1 : typing) (t2 : typing) : typing =
 
 let extend_name (label : string) (name : string) : string = String.concat "_" [label;name]
 
-let rec gen_sortings (input_process : process) : sorting * typing =
+let rec gen_sortings (input_process : process) : scoped_process * sorting * typing =
   match input_process with 
   | Request (a, k, p) -> 
     begin
-      let s, t = gen_sortings p in
+      let new_p, s, t = gen_sortings p in
       match (List.assoc_opt a s, List.assoc_opt a t) with
       | None, None -> 
         begin
           match List.assoc_opt k t with
-          | Some k_type -> ([(a, Pair_s(Unkown_t,k_type))] @ s, (List.remove_assoc k t))
-          | None -> ([(a, Pair_s(Unkown_t,Inact_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
+          | Some k_type -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unkown_t,k_type))] @ s, (List.remove_assoc k t))
+          | None -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unkown_t,Inact_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
         end
       | _, _ -> raise TypeError (* The name a was used for another session or as a channel. *)
     end
   | Accept (a, k, p) -> 
     begin
-      let s, t = gen_sortings p in
+      let new_p, s, t = gen_sortings p in
       match (List.assoc_opt a s, List.assoc_opt a t) with
       | None, None -> 
         begin
           match List.assoc_opt k t with
-          | Some k_type -> ([(a, Pair_s(k_type,Unkown_t))] @ s, (List.remove_assoc k t))
-          | None -> ([(a, Pair_s(Inact_t,Unkown_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
+          | Some k_type -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(k_type,Unkown_t))] @ s, (List.remove_assoc k t))
+          | None -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(Inact_t,Unkown_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
         end
       | _, _ -> raise TypeError (* The name a was used for another session or as a channel. *)
     end
   | Send (k, e, p) ->
     begin
       let e_sort = expr_sort e in
-      let s, t = gen_sortings p in 
+      let new_p, s, t = gen_sortings p in 
       match List.assoc_opt k t with 
-      | Some k_type -> (s, (List.remove_assoc k t) @ [(k, Send_t (e_sort, k_type))])
-      | None -> (s, t @ [(k, Send_t (e_sort, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
+      | Some k_type -> (Scoped_Send (k, e, new_p), s, (List.remove_assoc k t) @ [(k, Send_t (e_sort, k_type))])
+      | None -> (Scoped_Send (k, e, new_p), s, t @ [(k, Send_t (e_sort, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
     end
   | Reception (k, v, p) -> 
     begin
-      let s, t = gen_sortings(p) in 
+      let new_p, s, t = gen_sortings(p) in 
       match List.assoc_opt k t with 
-      | Some k_type -> (s, (List.remove_assoc k t) @ [(k, Reception_t (Var_s v, k_type))])
-      | None -> (s, t @ [(k, Reception_t (Var_s v, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
+      | Some k_type -> (Scoped_Reception (k, v, new_p), s, (List.remove_assoc k t) @ [(k, Reception_t (Var_s v, k_type))])
+      | None -> (Scoped_Reception (k, v, new_p), s, t @ [(k, Reception_t (Var_s v, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
     end
   | Branch (k, labels_proc) -> 
     (* TODO Fix propagation of empty branch. If (label,process) does not contain operations on k, 
     should add to branching with Inact/Closed so it can match with the selection of this branch.*)
     begin
-      let fold_fct = fun ((s,t) : (sorting * typing)) (l, p) -> 
+      let fold_fct = fun ((procs,s,t) : (((label * scoped_process) list) * sorting * typing)) (l, p) -> 
         begin
-          let s_prime, t_prime = gen_sortings p in
+          let new_p, s_prime, t_prime = gen_sortings p in
           let sorting_extend_fct = fun (a,a_sorting) -> 
             begin
               match List.assoc_opt a s with
@@ -246,7 +265,7 @@ let rec gen_sortings (input_process : process) : sorting * typing =
                   match a_sorting with
                   | Pair_s (accept, Unkown_t) -> (a, Pair_s (Branch_t [(l, accept)], Unkown_t))
                   | Pair_s (Unkown_t, request) -> (a, Pair_s (Unkown_t, Branch_t [(l, request)]))
-                  | Pair_s (accept, request) -> (extend_name l a,a_sorting)
+                  | Pair_s (accept, request) -> (extend_name l a,a_sorting) (* TODO This should not be possible anymore with the scoped compositions, need to simplify this later. *)
                   | _ -> raise TypeError (* Should not get anything but pairs. *)
                 end
               (* match s with
@@ -282,36 +301,37 @@ let rec gen_sortings (input_process : process) : sorting * typing =
           in
           let intermediate_t = List.map type_extend_fct t_prime in
           let new_t = intermediate_t @ (List.filter (fun (k,_) -> not (List.mem_assoc k intermediate_t)) t)
-          in (new_s, new_t)
+          in ([(l, new_p)] @ procs, new_s, new_t)
         end
         (* (let s, t = gen_sortings p in (combine_sortings acc s), (l,t)) in *)
       in
-      let (acc : (sorting * typing)) = ([],[]) in
-      let s, labels_typ = List.fold_left fold_fct acc labels_proc in
-      (s, labels_typ)
+      let (acc : (((label * scoped_process) list) * sorting * typing)) = ([],[],[]) in
+      let new_procs, s, labels_typ = List.fold_left fold_fct acc labels_proc in
+      (Scoped_Branch (k, new_procs), s, labels_typ)
     end
   | Selection (k, l, p) -> 
     begin
-      let s, t = gen_sortings p in
+      let new_p, s, t = gen_sortings p in
       match List.assoc_opt k t with
-      | Some k_type -> (s, [(k, Select_t [(l,k_type)])] @ (List.remove_assoc k t))
-      | None -> (s, [(k, Select_t [(l,Inact_t)])] @ t) (* Is Inact_t appropriate as the end of the type? *)
+      | Some k_type -> (Scoped_Selection (k, l, new_p), s, [(k, Select_t [(l,k_type)])] @ (List.remove_assoc k t))
+      | None -> (Scoped_Selection (k, l, new_p), s, [(k, Select_t [(l,Inact_t)])] @ t) (* Is Inact_t appropriate as the end of the type? *)
     end
-  | Throw (k1, k2, p) -> ([], []) (* TODO *)
-  | Catch (k1, k2, p) -> ([], []) (* TODO *)
+  | Throw (k1, k2, p) -> (Scoped_Inact, [], []) (* TODO *)
+  | Catch (k1, k2, p) -> (Scoped_Inact, [], []) (* TODO *)
   | Conditional (e, then_p, else_p) -> 
     begin
       (* let then_s, then_t = gen_sortings then_p in
       let else_s, else_t = gen_sortings else_p in *)
-      ([], []) (* TODO Either check here that both sides has same type or combine the outputs and delegate to later. *)
+      (Scoped_Inact, [], []) (* TODO Either check here that both sides has same type or combine the outputs and delegate to later. *)
     end
   | Composition (p1, p2) ->
     begin
-      let s1, t1 = gen_sortings p1 in
-      let s2, t2 = gen_sortings p2 in
-      (compose_sortings s1 s2, compose_typings t1 t2)
+      let new_p1, s1, t1 = gen_sortings p1 in
+      let new_p2, s2, t2 = gen_sortings p2 in
+      let partial, complete = compose_sortings s1 s2 in
+      (Scoped_composition (complete, new_p1, new_p2), partial, compose_typings t1 t2)
     end
-  | Inact -> ([], [])
-  | Hide (p_var, p) -> ([], []) (* TODO *)
-  | Rec (def, p) -> ([], []) (* TODO *)
-  | Proc_Var (p_var, e, k) -> ([], []) (* TODO *)
+  | Inact -> (Scoped_Inact, [], [])
+  | Hide (p_var, p) -> (Scoped_Inact, [], []) (* TODO *)
+  | Rec (def, p) -> (Scoped_Inact, [], []) (* TODO *)
+  | Proc_Var (p_var, e, k) -> (Scoped_Inact, [], []) (* TODO *)
