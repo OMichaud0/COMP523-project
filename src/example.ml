@@ -3,23 +3,23 @@
 #use "type-check.ml"
 
 let (bank : process) = Accept ("b", "h", Branch ("h", [
-  ("deposit", Reception ("h", "id", Reception ("h", "amt", Inact)));
-  ("withdraw", Reception ("h", "id", Reception ("h", "amt", Selection ("h", "failure", Inact))));
-  ("balance", Send ("h", Cst (Int 0), Inact));
+  ("bank_deposit", Reception ("h", "id", Reception ("h", "amt", Inact)));
+  ("bank_withdraw", Reception ("h", "id", Reception ("h", "amt", Selection ("h", "atm_failure", Inact))));
+  ("bank_balance", Send ("h", Cst (Int 0), Inact));
 ]))
 
 let (atm : process) = Accept ("a", "k", Reception ("k", "id", Branch ("k", [
-  ("deposit", Request ("b", "h", Reception ("k", "amt", Selection ("h", "deposit", Send ("h", Var "id", Send ("h", Var "amt", Inact))))));
-  ("withdraw", Request ("b", "h", Reception ("k", "amt", Selection ("h", "withdraw", Send ("h", Var "id", Send ("h", Var "amt", Branch ("h", [
-    ("success", Selection ("k", "dispense", Send ("k", Var "amt", Inact)));
-    ("failure", Selection ("k", "overdraft", Inact));
+  ("atm_deposit", Request ("b", "h", Reception ("k", "amt", Selection ("h", "bank_deposit", Send ("h", Var "id", Send ("h", Var "amt", Inact))))));
+  ("atm_withdraw", Request ("b", "h", Reception ("k", "amt", Selection ("h", "bank_withdraw", Send ("h", Var "id", Send ("h", Var "amt", Branch ("h", [
+    ("atm_success", Selection ("k", "user_dispense", Send ("k", Var "amt", Inact)));
+    ("atm_failure", Selection ("k", "user_overdraft", Inact));
   ])))))));
-  ("balance", Request ("b", "h", Selection ("h", "balance", Reception ("h", "amt", Send ("k", Var "amt", Inact)))));
+  ("atm_balance", Request ("b", "h", Selection ("h", "bank_balance", Reception ("h", "amt", Send ("k", Var "amt", Inact)))));
 ])))
 
-let (user : process) = Request ("a", "k", Send ("k", Cst (Int 42), Selection ("k", "withdraw", Send ("k", Cst (Int 100), Branch ("k", [
-  ("dispense", Reception ("k", "amt", Inact));
-  ("overdraft", Inact);
+let (user : process) = Request ("a", "k", Send ("k", Cst (Int 42), Selection ("k", "atm_withdraw", Send ("k", Cst (Int 100), Branch ("k", [
+  ("user_dispense", Reception ("k", "amt", Inact));
+  ("user_overdraft", Inact);
 ])))))
 
 let (p : process) = Composition (bank, Composition (atm, user))

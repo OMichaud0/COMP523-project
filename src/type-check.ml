@@ -205,11 +205,64 @@ let rec gen_sortings (input_process : process) : sorting * typing =
       | None -> (s, t @ [(k, Reception_t (Var_s v, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
     end
   | Branch (k, labels_proc) -> 
+    (* TODO Fix propagation of empty branch. If (label,process) does not contain operations on k, 
+    should add to branching with Inact/Closed so it can match with the selection of this branch.*)
     begin
       let fold_fct = fun ((s,t) : (sorting * typing)) (l, p) -> 
         begin
           let s_prime, t_prime = gen_sortings p in
-          let new_s = s @ (List.map (fun (a,s) -> (extend_name l a,s)) s_prime) in
+          let sorting_extend_fct = fun (a,a_sorting) -> 
+            begin
+              match List.assoc_opt a s with
+              | Some a_s ->
+                begin 
+                  match a_s, a_sorting with
+                  | Pair_s (accept1, Unkown_t), Pair_s (accept2, Unkown_t) ->
+                    begin
+                      match accept1 with 
+                      | Branch_t accept_labels -> 
+                        begin
+                          match List.assoc_opt l accept_labels with
+                          | Some _ -> raise TypeError (* Label is already in branching *)
+                          | None -> (a, Pair_s (Branch_t (accept_labels @ [(l, accept2)]), Unkown_t))
+                        end
+                      | _ -> raise TypeError (* Should not be possible, the None case below creates the initial branching. *)
+                    end
+                  | Pair_s (Unkown_t, request1), Pair_s (Unkown_t, request2) ->
+                    begin
+                      match request1 with 
+                      | Branch_t request_labels -> 
+                        begin
+                          match List.assoc_opt l request_labels with
+                          | Some _ -> raise TypeError (* Label is already in branching *)
+                          | None -> (a, Pair_s (Unkown_t, Branch_t (request_labels @ [(l, request2)])))
+                        end
+                      | _ -> raise TypeError (* Should not be possible, the None case below creates the initial branching. *)
+                    end
+                  | _, _ -> raise TypeError (* Should not get anything but pairs. *)
+                end
+              | None -> 
+                begin 
+                  match a_sorting with
+                  | Pair_s (accept, Unkown_t) -> (a, Pair_s (Branch_t [(l, accept)], Unkown_t))
+                  | Pair_s (Unkown_t, request) -> (a, Pair_s (Unkown_t, Branch_t [(l, request)]))
+                  | Pair_s (accept, request) -> (extend_name l a,a_sorting)
+                  | _ -> raise TypeError (* Should not get anything but pairs. *)
+                end
+              (* match s with
+              | Pair_s (accept,Unkown_t) -> 
+                begin 
+                  match accept with 
+                  | Branch accept_labels ->
+                  | 
+                end
+              | Pair_s (Unkown_t, request) -> 
+              | Pair_s (accept,request) -> (extend_name l a,s)
+              | _ -> raise TypeError (* Should not encounter anything but pairs here. *) *)
+            end
+          in
+          let intermediate_s = List.map sorting_extend_fct s_prime in
+          let new_s = intermediate_s @ (List.filter (fun (a,_) -> not (List.mem_assoc a intermediate_s)) s) in
           let type_extend_fct = fun (k,k_type) -> 
             begin
               match List.assoc_opt k t with
