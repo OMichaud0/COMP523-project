@@ -35,3 +35,13 @@ let (example_user : process) = Request ("a", "k", Reception ("k", "x", Inact))
 let (example_server : process) = Accept ("a", "k", Send ("k", Cst (Int 5), Inact))
 
 (* let example_sorting, _ = gen_sortings (Composition (example_user, example_server)) *)
+
+let (test_user : process) = Request ("a", "k", Reception ("k", "x", Inact))
+
+let (test_mid : process) = Accept ("a", "k", Request ("b", "h", Reception ("h", "y", Send ("k", Var "y", Inact))))
+
+let (test_server : process) = Accept ("b", "h", Send ("h", Cst (Int 5), Inact))
+
+let scoped_test, _, _ = gen_sortings (Composition (test_user, Composition (test_mid, test_server)))
+
+let propagated_test = propagate_sorts scoped_test
