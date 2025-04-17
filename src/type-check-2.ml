@@ -1,27 +1,21 @@
-#use type-check.ml
-#use example.ml
+#use "type-check.ml"
+#use "example.ml"
 
 (* take scoped_process p and return  *)
-let check-program (p : process) : boolean =
-  (* TODO: add try catch *)
-  let scoped, _, _  = gen_sortings p in (* TODO: need to check if others are empty? *)
-  let propagated = propagate_sorts scoped in
-  match type_check propagated [] [] with
-  | [] -> true (* Delta is empty *)
-  | _ -> false
+
 
 let rec type_check_2 (p : scoped_process) (s : sorting) (c : typing) : typing =
   match p with
   | Scoped_Request (a,k,p) ->
       let alpha,alpha_bar,s_new = pop_session a s in
-      let delta = type_check_2 p s_new (c @ (k,alpha)) in
+      let delta = type_check_2 p s_new (c @ [(k,alpha)]) in
       let alpha_prime,delta = pop_type k delta in
-      if alpha_prime = alpha_bar then delta else raise TypeError ("Expected type " ^ alpha_bar ^ " for request of channel " ^ k ^ " but got type " ^ alpha_prime)
+      if alpha_prime = alpha_bar then delta else raise (TypeError ("Expected type " ^ " for request of channel " ^ k ^ " but got type "))
   | Scoped_Accept (a,k,p) -> 
-      let alpha,alpha_bar_s_new = pop_session a s in
-      let delta = type_check_2 p s_new (c @ (k,alpha_bar)) in
+      let alpha,alpha_bar,s_new = pop_session a s in
+      let delta = type_check_2 p s_new (c @ [(k,alpha_bar)]) in
       let alpha_prime,delta = pop_type k delta in
-      if alpha_prime = alpha then delta else raise TypeError ("Expected type " ^ alpha ^ " for accept of channel " ^ k ^ " but got type " ^ alpha_prime)
+      if alpha_prime = alpha then delta else raise (TypeError ("Expected type " ^  " for accept of channel " ^ k ^ " but got type " ))
   | Scoped_Send (k,e,p) ->
       let s_tilde = e_sort s e in
       let _,c = pop_type k c in
@@ -29,43 +23,65 @@ let rec type_check_2 (p : scoped_process) (s : sorting) (c : typing) : typing =
       begin
         match List.assoc_opt k delta with
         | Some alpha -> [(k,Send_t (s_tilde,alpha))] @ (List.remove_assoc k delta)
-        | _ -> [(k,Send_t (s_tilde,Inact))] @ (List.remove_assoc k delta)
+        | _ -> [(k,Send_t (s_tilde,Inact_t))] @ (List.remove_assoc k delta)
       end
   | Scoped_Reception (k,x,p) ->
-    let s_tilde,c = pop_type k c in
+    let co_t,c = pop_type k c in
+    let s_tilde = match co_t with
+      | Send_t (s_sort,_) -> s_sort
+      | _ -> raise (TypeError ("Cotype is not a send"))
+    in
     let delta = type_check_2 p ([(x,s_tilde)] @ s) c in
     begin
       match List.assoc_opt k delta with
       | Some alpha -> [(k,Reception_t (s_tilde,alpha))] @ (List.remove_assoc k delta)
-      | _ -> [(k,Reception_t (s_tilde,Inact))] @ (List.remove_assoc k delta)
+      | _ -> [(k,Reception_t (s_tilde,Inact_t))] @ (List.remove_assoc k delta)
     end
   | Scoped_Branch (k,ls) ->
-    
-  | Scoped_Throw (k,k_prime,p) ->
-    let delta = type_check_2 p s c in
-    let alpha,c = pop_type k_prime c in
-    begin
-      match List.assoc_opt k delta with
-      | Some beta -> [(k,Send_t (alpha,beta))] @ [(k_prime,alpha)] @ (List.remove_assoc k delta)
-      | _ -> [(k,Send_t (alpha,Inact))] @ [(k_prime,alpha)] @ (List.remove_assoc k delta)
-    end
-  | Scoped_Catch (k,k_prime,p) ->
-    let delta = type_check_2 p s c in
-    let beta =
-      match List.assoc_opt k delta with
-      | Some b -> b
-      | _ -> Inact
+    let map_branch = fun (lab,lab_proc) : (label * typing) ->
+      let cotypes = consume_select k lab c in
+      let delta = type_check_2 lab_proc s cotypes in
+      let delta_prime = match List.assoc_opt k delta with
+        | Some t -> delta
+        | _ -> [(k,Inact_t)] @ delta
+      in
+      (lab,delta_prime)
     in
-    let alpha =
-      match List.assoc_opt k' delta with
-      | Some a -> a
-      | _ -> Inact
-    in
-    [(k,Reception_t (alpha,beta))] @ (List.remove_assoc k delta)
-  | Scoped_Conditional (e,p,q) ->
+    let mapped_labels = List.map map_branch ls in
+    List.fold_left (fun acc (l,new_t) ->
+      List.fold_left (fun acc2 (k_prime,k_prime_type) ->
+        let new_k_prime_type = if (compare k k_prime) == 0 then 
+            match List.assoc_opt k_prime acc2 with
+            | Some Branch_t (label_types) -> Branch_t ([(l,k_prime_type)] @ label_types) 
+            | None -> Branch_t ([(l,k_prime_type)])
+            | _ -> raise (TypeError "unexpected type found while combining labels")
+          else
+            match List.assoc_opt k_prime acc2 with
+            | Some k_p_t -> combine_types_for_branching k_p_t k_prime_type
+            | None -> k_prime_type
+        in
+        [(k_prime,new_k_prime_type)] @ (List.remove_assoc k_prime acc2)
+      ) acc new_t
+    ) [] mapped_labels
+  | Scoped_Selection (k,l,p) ->
+    let new_cotypes = consume_branching k l c in
+      let new_t = type_check_2 p s new_cotypes in
+      begin
+        match List.assoc_opt k new_t with
+          | Some k_type -> [(k, Select_t [(l,k_type)])] @ (List.remove_assoc k new_t)
+          | None -> [(k, Select_t [(l,Inact_t)])] @ new_t
+      end 
   | Scoped_Inact -> []
   | Scoped_Composition (s_new,p,q) ->
     let s = s @ s_new in
-    let delta = type_check_2 p s in
-    let delta_prime = type_check_2 q s in
-    if is_compatible delta delta_prime then compose delta delta_prime else (raise TypeError "Scoped_Composition typing error: composed processes have incompatible typings")
+    let delta = type_check_2 p s c in
+    let delta_prime = type_check_2 q s c in
+    if is_compatible delta delta_prime then compose delta delta_prime else raise (TypeError "Scoped_Composition typing error: composed processes have incompatible typings")
+
+let check_program (p : process) : bool =
+  (* TODO: add try catch *)
+  let scoped, _, _  = gen_sortings p in (* TODO: need to check if others are empty? *)
+  let propagated = propagate_sorts scoped in
+  match type_check_2 propagated [] [] with
+  | [] -> true (* Delta is empty *)
+  | _ -> false
