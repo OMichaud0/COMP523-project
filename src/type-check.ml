@@ -181,6 +181,18 @@ let compose_typings (t1 : typing) (t2 : typing) : typing =
 
 let extend_name (label : string) (name : string) : string = String.concat "_" [label;name]
 
+let rec combine_types_for_branching (t1 : typ) (t2 : typ) : typ =
+  match t1, t2 with
+  | Select_t l_t1, Select_t l_t2 -> 
+    begin
+      match (List.fold_left (fun acc (l,_) -> acc || (List.mem_assoc l l_t2)) false l_t1) with
+      | true -> raise (TypeError "cannot combine selects with overlapping labels")
+      | false -> Select_t (l_t1 @ l_t2)
+    end
+  | Send_t (s1,sub_t1), Send_t (s2,sub_t2) -> Send_t (s1,(combine_types_for_branching sub_t1 sub_t2)) (* TODO might need to check both sorts are the same. *)
+  | Reception_t (s1,sub_t1), Reception_t (s2,sub_t2) -> Reception_t (s1,(combine_types_for_branching sub_t1 sub_t2)) (* TODO might need to check both sorts are the same. *)
+  | _,_ -> raise (TypeError "incompatible type combination") (* TODO might need more cases in the future *)
+
 let rec gen_sortings (input_process : process) : scoped_process * sorting * typing =
   match input_process with 
   | Request (a, k, p) -> 
@@ -223,7 +235,7 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
       | None -> (Scoped_Reception (k, v, new_p), s, t @ [(k, Reception_t (Var_s v, Inact_t))]) (* Is Inact_t appropriate as the end of the type? *)
     end
   | Branch (k, labels_proc) -> 
-    (* TODO Fix propagation of empty branch. If (label,process) does not contain operations on k, 
+    (* (* TODO Fix propagation of empty branch. If (label,process) does not contain operations on k, 
     should add to branching with Inact/Closed so it can match with the selection of this branch.*)
     begin
       let fold_fct = fun ((procs,s,t) : (((label * scoped_process) list) * sorting * typing)) (l, p) -> 
@@ -297,6 +309,68 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
       let (acc : (((label * scoped_process) list) * sorting * typing)) = ([],[],[]) in
       let new_procs, s, labels_typ = List.fold_left fold_fct acc labels_proc in
       (Scoped_Branch (k, new_procs), s, labels_typ)
+    end *)
+    begin
+      let map_gen_sortings = fun (l,l_proc) ->
+        begin
+          let new_p, new_s, new_t = gen_sortings l_proc in
+          let new_t = match List.assoc_opt k new_t with
+            | Some k_type -> new_t
+            | None -> [(k,Inact_t)] @ new_t
+          in
+          (l, new_p, new_s, new_t)
+        end
+      in
+      let generated = List.map map_gen_sortings labels_proc in
+      let new_labels_procs = List.map (fun (l,new_p,_,_) -> (l,new_p)) generated in
+      let combined_sortings = List.fold_left (fun acc (l,_,new_s,_) -> 
+        List.fold_left (fun acc2 (name,n_sort) -> 
+          let new_pair = match List.assoc_opt name acc2, n_sort with
+            | Some (Pair_s (accept1,Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unkown_t)
+            | Some (Pair_s (Unkown_t,request1)), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,(combine_types_for_branching request1 request2))
+            | None, Pair_s (accept,Unkown_t) -> n_sort
+            | None, Pair_s (Unkown_t,request) -> n_sort
+            | _,_ -> raise (TypeError "incompatible sortings in branching during sorting generation")
+          in 
+          [(name,new_pair)] @ (List.remove_assoc name acc2)
+        ) acc new_s
+      ) [] generated in 
+      (* let combined_types = List.fold_left (fun acc (l,_,_,new_t) ->
+        List.fold_left (fun acc2 (k_prime,k_prime_type) ->
+          let new_k_prime_type = match List.assoc_opt k_prime acc2 with
+            | Some Branch_t (label_types) -> 
+              begin 
+                match List.mem_assoc l label_types with
+                | true -> raise (TypeError "label is already in branching")
+                | false -> Branch_t ([(l,k_prime_type)] @ label_types) 
+              end
+            | None -> Branch_t ([(l,k_prime_type)])
+            | _ -> raise (TypeError "unexpected type found while combining labels")
+          in
+          [(k_prime,new_k_prime_type)] @ (List.remove_assoc k_prime acc2)
+        ) acc new_t
+      ) [] generated in *)
+      let combined_types = List.fold_left (fun acc (l,_,_,new_t) ->
+        List.fold_left (fun acc2 (k_prime,k_prime_type) ->
+          let new_k_prime_type = if (compare k k_prime) == 0 then 
+              match List.assoc_opt k_prime acc2 with
+              | Some Branch_t (label_types) -> 
+                begin 
+                  match List.mem_assoc l label_types with
+                  | true -> raise (TypeError "label is already in branching")
+                  | false -> Branch_t ([(l,k_prime_type)] @ label_types) 
+                end
+              | None -> Branch_t ([(l,k_prime_type)])
+              | _ -> raise (TypeError "unexpected type found while combining labels")
+            else
+              match List.assoc_opt k_prime acc2 with
+              | Some k_p_t -> combine_types_for_branching k_p_t k_prime_type
+              | None -> k_prime_type
+          in
+          [(k_prime,new_k_prime_type)] @ (List.remove_assoc k_prime acc2)
+        ) acc new_t
+      ) [] generated in
+      Scoped_Branch (k, new_labels_procs), combined_sortings, combined_types
     end
   | Selection (k, l, p) -> 
     begin
@@ -379,6 +453,37 @@ let e_sort (s : sorting) (e : expr) : sort =
       | None -> Var_s x
     end
 
+let possible_selection (k : channel) (t : typing) = 
+  match List.assoc_opt k t with
+  | Some Select_t label_types -> List.map (fun (l,_) -> l) label_types
+  | _ -> raise (TypeError "the cotype is not a selection")
+
+let consume_branching (k : channel) (l : label) (t : typing) : typing = 
+  let new_k_type = match List.assoc_opt k t with
+    | Some Branch_t (label_types) -> 
+      begin 
+        match List.assoc_opt l label_types with
+        | Some l_type -> l_type
+        | None -> raise (TypeError "failed to consume branching, label not found")
+      end
+    | None -> raise (TypeError ("could not find type for channel " ^ k))
+    | _ -> raise (TypeError "failed to consume branching, type was not a branch")
+  in
+  [(k,new_k_type)] @ (List.remove_assoc k t)
+
+let consume_select (k : channel) (l : label) (t : typing) : typing =
+  let new_k_type = match List.assoc_opt k t with
+    | Some Select_t (label_types) -> 
+      begin 
+        match List.assoc_opt l label_types with
+        | Some l_type -> l_type
+        | None -> raise (TypeError "failed to consume selection, label not found")
+      end
+    | None -> raise (TypeError ("could not find type for channel " ^ k))
+    | _ -> raise (TypeError "failed to consume selection, type was not a select")
+  in
+  [(k,new_k_type)] @ (List.remove_assoc k t)
+
 let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes : typing) (input_process : scoped_process) : scoped_process * sorting * typing * bool =
   match input_process with 
   | Scoped_Request (a, k, p) -> 
@@ -445,8 +550,92 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
       in
       Scoped_Reception (k, v, new_p), new_s, new_t, new_change || change
     end
-  | Scoped_Branch (k, labels_proc) -> Scoped_Inact, [], [], false
-  | Scoped_Selection (k, l, p) -> Scoped_Inact, [], [], false
+  | Scoped_Branch (k, labels_proc) ->
+    begin
+      let label_selection = possible_selection k cotypes in
+      let branch_to_check = List.filter (fun (l,_) -> (List.exists (fun l_prime -> (compare l l_prime) == 0) label_selection)) labels_proc in
+      let map_propagation = fun (l,l_proc) : (label * scoped_process * sorting * typing * bool) ->
+        begin
+          let new_types = consume_branching k l types in 
+          let new_cotypes = consume_select k l cotypes in
+          let new_p, new_s, new_t, new_change = propagate_sorts_rec input_sorting new_types new_cotypes l_proc in
+          let new_t = match List.assoc_opt k new_t with
+            | Some k_type -> new_t
+            | None -> [(k,Inact_t)] @ new_t
+          in
+          (l, new_p, new_s, new_t, new_change)
+        end
+      in
+      let propagated = List.map map_propagation branch_to_check in
+      let new_labels_procs = List.map (fun (l,new_p,_,_,_) -> (l,new_p)) propagated in
+      let new_change = List.fold_left (fun acc (_,_,_,_,cur_change) -> acc || cur_change) false propagated in
+      (* let combined_sortings = List.fold_left (fun acc (l,_,new_s,_,_) -> 
+        List.fold_left (fun acc2 (name,n_sort) -> 
+          let new_pair = match List.assoc_opt name acc2, n_sort with
+            | Some (Pair_s (Branch_t (labels_types1),Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s (Branch_t ([(l,accept2)] @ labels_types1),Unkown_t)
+            | Some (Pair_s (Unkown_t,Branch_t (labels_types1))), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,Branch_t ([(l,request2)] @ labels_types1))
+            | None, Pair_s (accept,Unkown_t) -> Pair_s (Branch_t ([(l,accept)]),Unkown_t)
+            | None, Pair_s (Unkown_t,request) -> Pair_s (Unkown_t, Branch_t (([(l,request)])))
+            | _,_ -> raise (TypeError "incompatible sortings in branching")
+          in 
+          [(name,new_pair)] @ (List.remove_assoc name acc2)
+        ) acc new_s
+      ) [] propagated in  *)
+      let combined_sortings = List.fold_left (fun acc (l,_,new_s,_,_) -> 
+        List.fold_left (fun acc2 (name,n_sort) -> 
+          let new_pair = match List.assoc_opt name acc2, n_sort with
+            | Some (Pair_s (accept1,Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unkown_t)
+            | Some (Pair_s (Unkown_t,request1)), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,(combine_types_for_branching request1 request2))
+            | None, Pair_s (accept,Unkown_t) -> n_sort
+            | None, Pair_s (Unkown_t,request) -> n_sort
+            | _,_ -> raise (TypeError "incompatible sortings in branching during sorting generation")
+          in 
+          [(name,new_pair)] @ (List.remove_assoc name acc2)
+        ) acc new_s
+      ) [] propagated in
+      (* let combined_types = List.fold_left (fun acc (l,_,_,new_t,_) ->
+        List.fold_left (fun acc2 (k,k_type) ->
+          let new_k_type = match List.assoc_opt k acc2 with
+            | Some Branch_t (label_types) -> Branch_t ([(l,k_type)] @ label_types)
+            | None -> Branch_t ([(l,k_type)])
+            | _ -> raise (TypeError "unxpected type found while combining labels")
+          in
+          [(k,new_k_type)] @ (List.remove_assoc k acc2)
+        ) acc new_t
+      ) [] propagated in *)
+      let combined_types = List.fold_left (fun acc (l,_,_,new_t,_) ->
+        List.fold_left (fun acc2 (k_prime,k_prime_type) ->
+          let new_k_prime_type = if (compare k k_prime) == 0 then 
+              match List.assoc_opt k_prime acc2 with
+              | Some Branch_t (label_types) -> 
+                begin 
+                  match List.mem_assoc l label_types with
+                  | true -> raise (TypeError "label is already in branching")
+                  | false -> Branch_t ([(l,k_prime_type)] @ label_types) 
+                end
+              | None -> Branch_t ([(l,k_prime_type)])
+              | _ -> raise (TypeError "unexpected type found while combining labels")
+            else
+              match List.assoc_opt k_prime acc2 with
+              | Some k_p_t -> combine_types_for_branching k_p_t k_prime_type
+              | None -> k_prime_type
+          in
+          [(k_prime,new_k_prime_type)] @ (List.remove_assoc k_prime acc2)
+        ) acc new_t
+      ) [] propagated in
+      Scoped_Branch (k, new_labels_procs), combined_sortings, combined_types, new_change
+    end
+  | Scoped_Selection (k, l, p) -> 
+    begin
+      let new_types = consume_select k l types in
+      let new_cotypes = consume_branching k l cotypes in
+      let new_p, new_s, new_t, change = propagate_sorts_rec input_sorting new_types new_cotypes p in
+      let new_t =   match List.assoc_opt k new_t with
+        | Some k_type -> [(k, Select_t [(l,k_type)])] @ (List.remove_assoc k new_t)
+        | None -> [(k, Select_t [(l,Inact_t)])] @ new_t
+      in
+      Scoped_Selection (k, l, new_p), new_s, new_t, change
+    end
   | Scoped_Throw (k1, k2, p) -> Scoped_Inact, [], [], false (* TODO *)
   | Scoped_Catch (k1, k2, p) -> Scoped_Inact, [], [], false (* TODO *)
   | Scoped_Conditional (e, then_p, else_p) -> Scoped_Inact, [], [], false
