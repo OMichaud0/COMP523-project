@@ -1,6 +1,7 @@
 #use "types.ml"
 #use "terms.ml"
 #use "type-check.ml"
+#use "type-check-2.ml"
 
 let (bank : process) = Accept ("b", "h", Branch ("h", [
   ("bank_deposit", Reception ("h", "id", Reception ("h", "amt", Inact)));

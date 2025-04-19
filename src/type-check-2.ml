@@ -1,5 +1,4 @@
 #use "type-check.ml"
-#use "example.ml"
 
 (* take scoped_process p and return  *)
 
@@ -9,12 +8,18 @@ let rec type_check_2 (p : scoped_process) (s : sorting) (c : typing) : typing =
   | Scoped_Request (a,k,p) ->
       let alpha,alpha_bar,s_new = pop_session a s in
       let delta = type_check_2 p s_new (c @ [(k,alpha)]) in
-      let alpha_prime,delta = pop_type k delta in
+      let alpha_prime,delta = match List.assoc_opt k delta with
+        | Some k_t -> k_t, (List.remove_assoc k delta)
+        | None -> Inact_t, delta
+      in
       if alpha_prime = alpha_bar then delta else raise (TypeError ("Expected type " ^ " for request of channel " ^ k ^ " but got type "))
   | Scoped_Accept (a,k,p) -> 
       let alpha,alpha_bar,s_new = pop_session a s in
       let delta = type_check_2 p s_new (c @ [(k,alpha_bar)]) in
-      let alpha_prime,delta = pop_type k delta in
+      let alpha_prime,delta = match List.assoc_opt k delta with
+        | Some k_t -> k_t, (List.remove_assoc k delta)
+        | None -> Inact_t, delta
+      in
       if alpha_prime = alpha then delta else raise (TypeError ("Expected type " ^  " for accept of channel " ^ k ^ " but got type " ))
   | Scoped_Send (k,e,p) ->
       let s_tilde = e_sort s e in

@@ -1,3 +1,5 @@
+#use "terms.ml"
+
 type sort =
     | Nat_s
     | Bool_s
@@ -9,8 +11,8 @@ and typ =
     | Reception_t of sort * typ (* \/ *)
     | Throw_t of typ * typ (* /\ *)
     | Catch_t of typ * typ (* \/ *)
-    | Branch_t of ((string * typ) list) (* & *)
-    | Select_t of ((string * typ) list) (* \oplus*)
+    | Branch_t of ((label * typ) list) (* & *)
+    | Select_t of ((label * typ) list) (* \oplus*)
     | Inact_t (* 1 *)
     | Var_t of string (* t *)
     | Mu_t of string * typ (* \mu t.\alpha *)

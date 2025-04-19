@@ -402,7 +402,7 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
 let pop_type (k : channel) (types : typing) : typ * typing =
   let t = match List.assoc_opt k types with
     | Some k_type -> k_type
-    | None -> raise (TypeError "pop_type")
+    | None -> raise (TypeError ("could not pop type, channel " ^ k ^ " not in typing"))
   in
   let types_prime = List.remove_assoc k types in
   let popped_type, subtype = match t with
@@ -410,7 +410,7 @@ let pop_type (k : channel) (types : typing) : typ * typing =
     | Reception_t (s, sub_t) -> Reception_t (s, Inact_t), sub_t
     | Throw_t (t_prime, sub_t) -> Throw_t (t_prime, Inact_t), sub_t
     | Catch_t (t_prime, sub_t) -> Catch_t (t_prime, Inact_t), sub_t
-    | _ -> raise (TypeError "pop_type") (* TODO Add Inact handling? *)
+    | _ -> raise (TypeError ("could not pop type, unexpected type found for channel " ^ k)) (* TODO Add Inact handling? *)
   in
   let new_typing = [(k, subtype)] @ types_prime in
   (popped_type, new_typing)
