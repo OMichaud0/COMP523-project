@@ -153,8 +153,8 @@ let combine_sortings (s1 : sorting) (s2 : sorting) : sorting =
 
 let construct_pair_s (s1 : sort) (s2 : sort) : sort =
   match s1, s2 with
-  | Pair_s (accept,Unkown_t), Pair_s (Unkown_t,request) -> Pair_s(accept,request)
-  | Pair_s (Unkown_t,request), Pair_s (accept,Unkown_t) -> Pair_s(accept,request)
+  | Pair_s (accept,Unknown_t), Pair_s (Unknown_t,request) -> Pair_s(accept,request)
+  | Pair_s (Unknown_t,request), Pair_s (accept,Unknown_t) -> Pair_s(accept,request)
   | _, _ -> raise (TypeError "error")
 
 let compose_sortings (s1 : sorting) (s2 : sorting) : sorting * sorting =
@@ -202,8 +202,8 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
       | None, None -> 
         begin
           match List.assoc_opt k t with
-          | Some k_type -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unkown_t,k_type))] @ s, (List.remove_assoc k t))
-          | None -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unkown_t,Inact_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
+          | Some k_type -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unknown_t,k_type))] @ s, (List.remove_assoc k t))
+          | None -> (Scoped_Request (a, k, new_p), [(a, Pair_s(Unknown_t,Inact_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
         end
       | _, _ -> raise (TypeError "error") (* The name a was used for another session or as a channel. *)
     end
@@ -214,8 +214,8 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
       | None, None -> 
         begin
           match List.assoc_opt k t with
-          | Some k_type -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(k_type,Unkown_t))] @ s, (List.remove_assoc k t))
-          | None -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(Inact_t,Unkown_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
+          | Some k_type -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(k_type,Unknown_t))] @ s, (List.remove_assoc k t))
+          | None -> (Scoped_Accept (a, k, new_p), [(a, Pair_s(Inact_t,Unknown_t))] @ s, t) (* Is Inact_t appropriate as the end of the type? *)
         end
       | _, _ -> raise (TypeError "error") (* The name a was used for another session or as a channel. *)
     end
@@ -247,25 +247,25 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
               | Some a_s ->
                 begin 
                   match a_s, a_sorting with
-                  | Pair_s (accept1, Unkown_t), Pair_s (accept2, Unkown_t) ->
+                  | Pair_s (accept1, Unknown_t), Pair_s (accept2, Unknown_t) ->
                     begin
                       match accept1 with 
                       | Branch_t accept_labels -> 
                         begin
                           match List.assoc_opt l accept_labels with
                           | Some _ -> raise (TypeError "error") (* Label is already in branching *)
-                          | None -> (a, Pair_s (Branch_t (accept_labels @ [(l, accept2)]), Unkown_t))
+                          | None -> (a, Pair_s (Branch_t (accept_labels @ [(l, accept2)]), Unknown_t))
                         end
                       | _ -> raise (TypeError "error") (* Should not be possible, the None case below creates the initial branching. *)
                     end
-                  | Pair_s (Unkown_t, request1), Pair_s (Unkown_t, request2) ->
+                  | Pair_s (Unknown_t, request1), Pair_s (Unknown_t, request2) ->
                     begin
                       match request1 with 
                       | Branch_t request_labels -> 
                         begin
                           match List.assoc_opt l request_labels with
                           | Some _ -> raise (TypeError "error") (* Label is already in branching *)
-                          | None -> (a, Pair_s (Unkown_t, Branch_t (request_labels @ [(l, request2)])))
+                          | None -> (a, Pair_s (Unknown_t, Branch_t (request_labels @ [(l, request2)])))
                         end
                       | _ -> raise (TypeError "error") (* Should not be possible, the None case below creates the initial branching. *)
                     end
@@ -274,8 +274,8 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
               | None -> 
                 begin 
                   match a_sorting with
-                  | Pair_s (accept, Unkown_t) -> (a, Pair_s (Branch_t [(l, accept)], Unkown_t))
-                  | Pair_s (Unkown_t, request) -> (a, Pair_s (Unkown_t, Branch_t [(l, request)]))
+                  | Pair_s (accept, Unknown_t) -> (a, Pair_s (Branch_t [(l, accept)], Unknown_t))
+                  | Pair_s (Unknown_t, request) -> (a, Pair_s (Unknown_t, Branch_t [(l, request)]))
                   | Pair_s (accept, request) -> (extend_name l a,a_sorting) (* TODO This should not be possible anymore with the scoped compositions, need to simplify this later. *)
                   | _ -> raise (TypeError "error") (* Should not get anything but pairs. *)
                 end
@@ -326,10 +326,10 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
       let combined_sortings = List.fold_left (fun acc (l,_,new_s,_) -> 
         List.fold_left (fun acc2 (name,n_sort) -> 
           let new_pair = match List.assoc_opt name acc2, n_sort with
-            | Some (Pair_s (accept1,Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unkown_t)
-            | Some (Pair_s (Unkown_t,request1)), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,(combine_types_for_branching request1 request2))
-            | None, Pair_s (accept,Unkown_t) -> n_sort
-            | None, Pair_s (Unkown_t,request) -> n_sort
+            | Some (Pair_s (accept1,Unknown_t)), Pair_s (accept2,Unknown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unknown_t)
+            | Some (Pair_s (Unknown_t,request1)), Pair_s (Unknown_t,request2) -> Pair_s (Unknown_t,(combine_types_for_branching request1 request2))
+            | None, Pair_s (accept,Unknown_t) -> n_sort
+            | None, Pair_s (Unknown_t,request) -> n_sort
             | _,_ -> raise (TypeError "incompatible sortings in branching during sorting generation")
           in 
           [(name,new_pair)] @ (List.remove_assoc name acc2)
@@ -493,8 +493,8 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
       let new_cotypes = [(k,accept)] @ cotypes in
       let new_p, new_s, new_t, change = propagate_sorts_rec new_sorting new_types new_cotypes p in
       let new_s, new_t = match List.assoc_opt k new_t with
-        | Some k_type -> [(a, Pair_s(Unkown_t,k_type))] @ new_s, (List.remove_assoc k new_t)
-        | None -> [(a, Pair_s(Unkown_t,Inact_t))] @ new_s, new_t
+        | Some k_type -> [(a, Pair_s(Unknown_t,k_type))] @ new_s, (List.remove_assoc k new_t)
+        | None -> [(a, Pair_s(Unknown_t,Inact_t))] @ new_s, new_t
       in Scoped_Request (a, k, new_p), new_s, new_t, change
     end
   | Scoped_Accept (a, k, p) -> 
@@ -504,8 +504,8 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
       let new_cotypes = [(k,request)] @ cotypes in
       let new_p, new_s, new_t, change = propagate_sorts_rec new_sorting new_types new_cotypes p in
       let new_s, new_t = match List.assoc_opt k new_t with
-        | Some k_type -> [(a, Pair_s(k_type,Unkown_t))] @ new_s, (List.remove_assoc k new_t)
-        | None -> [(a, Pair_s(Inact_t,Unkown_t))] @ new_s, new_t
+        | Some k_type -> [(a, Pair_s(k_type,Unknown_t))] @ new_s, (List.remove_assoc k new_t)
+        | None -> [(a, Pair_s(Inact_t,Unknown_t))] @ new_s, new_t
       in Scoped_Accept (a, k, new_p), new_s, new_t, change
     end
   | Scoped_Send (k, e, p) -> 
@@ -572,10 +572,10 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
       (* let combined_sortings = List.fold_left (fun acc (l,_,new_s,_,_) -> 
         List.fold_left (fun acc2 (name,n_sort) -> 
           let new_pair = match List.assoc_opt name acc2, n_sort with
-            | Some (Pair_s (Branch_t (labels_types1),Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s (Branch_t ([(l,accept2)] @ labels_types1),Unkown_t)
-            | Some (Pair_s (Unkown_t,Branch_t (labels_types1))), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,Branch_t ([(l,request2)] @ labels_types1))
-            | None, Pair_s (accept,Unkown_t) -> Pair_s (Branch_t ([(l,accept)]),Unkown_t)
-            | None, Pair_s (Unkown_t,request) -> Pair_s (Unkown_t, Branch_t (([(l,request)])))
+            | Some (Pair_s (Branch_t (labels_types1),Unknown_t)), Pair_s (accept2,Unknown_t) -> Pair_s (Branch_t ([(l,accept2)] @ labels_types1),Unknown_t)
+            | Some (Pair_s (Unknown_t,Branch_t (labels_types1))), Pair_s (Unknown_t,request2) -> Pair_s (Unknown_t,Branch_t ([(l,request2)] @ labels_types1))
+            | None, Pair_s (accept,Unknown_t) -> Pair_s (Branch_t ([(l,accept)]),Unknown_t)
+            | None, Pair_s (Unknown_t,request) -> Pair_s (Unknown_t, Branch_t (([(l,request)])))
             | _,_ -> raise (TypeError "incompatible sortings in branching")
           in 
           [(name,new_pair)] @ (List.remove_assoc name acc2)
@@ -584,10 +584,10 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
       let combined_sortings = List.fold_left (fun acc (l,_,new_s,_,_) -> 
         List.fold_left (fun acc2 (name,n_sort) -> 
           let new_pair = match List.assoc_opt name acc2, n_sort with
-            | Some (Pair_s (accept1,Unkown_t)), Pair_s (accept2,Unkown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unkown_t)
-            | Some (Pair_s (Unkown_t,request1)), Pair_s (Unkown_t,request2) -> Pair_s (Unkown_t,(combine_types_for_branching request1 request2))
-            | None, Pair_s (accept,Unkown_t) -> n_sort
-            | None, Pair_s (Unkown_t,request) -> n_sort
+            | Some (Pair_s (accept1,Unknown_t)), Pair_s (accept2,Unknown_t) -> Pair_s ((combine_types_for_branching accept1 accept2),Unknown_t)
+            | Some (Pair_s (Unknown_t,request1)), Pair_s (Unknown_t,request2) -> Pair_s (Unknown_t,(combine_types_for_branching request1 request2))
+            | None, Pair_s (accept,Unknown_t) -> n_sort
+            | None, Pair_s (Unknown_t,request) -> n_sort
             | _,_ -> raise (TypeError "incompatible sortings in branching during sorting generation")
           in 
           [(name,new_pair)] @ (List.remove_assoc name acc2)

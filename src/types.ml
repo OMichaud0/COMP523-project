@@ -17,7 +17,7 @@ and typ =
     | Var_t of string (* t *)
     | Mu_t of string * typ (* \mu t.\alpha *)
     | Closed_t (* \perp *)
-    | Unkown_t (* this is strictly used to generate the sessions *)
+    | Unknown_t (* this is strictly used to generate the sessions *)
 
 let compare_type a b = true (* TODO: add comparison*)
 
