@@ -14,8 +14,6 @@ and typ =
     | Closed_t (* \perp *)
     | Unknown_t (* this is strictly used to generate the sessions *)
 
-let compare_type a b = true (* TODO: add comparison*)
-
 let rec cotype (alpha : typ) (a_bar : typ) : bool = match alpha,a_bar with
     | Send_t (s1,t1), Reception_t (s2,t2) -> cotype t1 t2
     | Reception_t (s1,t1), Send_t (s2,t2) -> cotype t1 t2
@@ -33,8 +31,34 @@ let rec typ_equal (type1 : typ) (type2 : typ) : bool =
     match type1, type2 with 
     | Send_t (s1,t1), Send_t (s2,t2) -> (sort_equal s1 s2) && (typ_equal t1 t2)
     | Reception_t (s1,t1), Reception_t (s2,t2) -> (sort_equal s1 s2) && (typ_equal t1 t2)
-    | Branch_t l1, Branch_t l2 -> true (* TODO This just needs an implementation didn't have time to write it *)
-    | Select_t l1, Select_t l2 -> true (* TODO This just needs an implementation didn't have time to write it *)
+    | Branch_t l1, Branch_t l2 -> 
+        begin
+            match List.compare_lengths l1 l2 with
+            | 0 -> 
+                begin
+                    let fold_fct = fun acc (l,lt1) -> 
+                        match List.assoc_opt l l2 with
+                        | Some lt2 -> acc && (typ_equal lt1 lt2)
+                        | None -> false
+                    in
+                    List.fold_left fold_fct true l1
+                end
+            | _ -> false
+        end
+    | Select_t l1, Select_t l2 -> 
+        begin
+            match List.compare_lengths l1 l2 with
+            | 0 -> 
+                begin
+                    let fold_fct = fun acc (l,lt1) -> 
+                        match List.assoc_opt l l2 with
+                        | Some lt2 -> acc && (typ_equal lt1 lt2)
+                        | None -> false
+                    in
+                    List.fold_left fold_fct true l1
+                end
+            | _ -> false
+          end
     | Inact_t, Inact_t -> true
     | Closed_t, Closed_t -> true
     | _, _ -> false
@@ -43,5 +67,5 @@ and sort_equal (sort1 : sort) (sort2 : sort) : bool =
     | Nat_s, Nat_s -> true
     | Bool_s, Bool_s -> true
     | Pair_s (t11,t12), Pair_s (t21,t22) -> (typ_equal t11 t21) && (typ_equal t12 t22)
-    | Var_s x, Var_s y -> true (* TODO might need some sort of environment to map variables with different names used correspondingly *)
+    | Var_s x, Var_s y -> true 
     | _, _ -> false

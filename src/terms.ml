@@ -1,10 +1,10 @@
 type name = string
 
-type channel = string
+type channel = name
 
 type label = string
 
-type var = string
+type var = name
 
 type const =
   | Int of int
