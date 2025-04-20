@@ -1,7 +1,8 @@
 #use "types.ml"
 #use "terms.ml"
 #use "type-check.ml"
-#use "type-check-2.ml"
+
+(* ################################################################################ *)
 
 let (bank : process) = Accept ("b", "h", Branch ("h", [
   ("bank_deposit", Reception ("h", "id", Reception ("h", "amt", Inact)));
@@ -23,19 +24,17 @@ let (user : process) = Request ("a", "k", Send ("k", Cst (Int 42), Selection ("k
   ("user_overdraft", Inact);
 ])))))
 
-let (p : process) = Composition (bank, Composition (atm, user))
+let (atm : process) = Composition (bank, Composition (atm, user))
 
-let scoped_p, s, t = gen_sortings p
+let atm_check = check_program atm
 
-(* let a = List.assoc "a" s *)
-
-(* let Pair_s (a_accept,a_request) = a *)
+(* ################################################################################ *)
 
 let (example_user : process) = Request ("a", "k", Reception ("k", "x", Inact))
 
 let (example_server : process) = Accept ("a", "k", Send ("k", Cst (Int 5), Inact))
 
-(* let example_sorting, _ = gen_sortings (Composition (example_user, example_server)) *)
+(* ################################################################################ *)
 
 let (test_user : process) = Request ("a", "k", Reception ("k", "x", Inact))
 
@@ -43,9 +42,11 @@ let (test_mid : process) = Accept ("a", "k", Request ("b", "h", Reception ("h", 
 
 let (test_server : process) = Accept ("b", "h", Send ("h", Cst (Int 5), Inact))
 
-let scoped_test, _, _ = gen_sortings (Composition (test_user, Composition (test_mid, test_server)))
+let test = Composition (test_user, Composition (test_mid, test_server))
 
-let propagated_test = propagate_sorts scoped_test
+let test_check = check_program test
+
+(* ################################################################################ *)
 
 let (cond_test_user : process) =  Request ("a", "k", Reception ("k", "x", Conditional (Var "x", Inact, Inact)))
 
@@ -58,3 +59,7 @@ let (cond_test_server_ok : process) = Accept ("b", "h", Send ("h", Cst (Bool tru
 let (cond_test_fail : process) = (Composition (cond_test_user, Composition (cond_test_mid, cond_test_server_fail)))
 
 let (cond_test_ok : process) = (Composition (cond_test_user, Composition (cond_test_mid, cond_test_server_ok)))
+
+let cond_test_fail_check = check_program cond_test_fail
+
+let cond_test_ok_check = check_program cond_test_ok
