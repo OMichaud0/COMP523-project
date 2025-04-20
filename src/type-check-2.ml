@@ -76,6 +76,19 @@ let rec type_check_2 (p : scoped_process) (s : sorting) (c : typing) : typing =
           | Some k_type -> [(k, Select_t [(l,k_type)])] @ (List.remove_assoc k new_t)
           | None -> [(k, Select_t [(l,Inact_t)])] @ new_t
       end 
+  | Scoped_Conditional (cond, then_p, else_p) ->
+    begin
+      match e_sort s cond with
+      | Bool_s -> 
+        begin
+          let then_t = type_check_2 then_p s c in
+          let else_t = type_check_2 else_p s c in
+          match conditional_typing_equal then_t else_t with
+          | true -> then_t
+          | _ -> raise (TypeError "P and Q of conditional \"if e then P else Q\" have different typings")
+        end
+      | _ -> raise (TypeError "condition of conditional statement does not have sort bool")
+    end
   | Scoped_Inact -> []
   | Scoped_Composition (s_new,p,q) ->
     let s = s @ s_new in

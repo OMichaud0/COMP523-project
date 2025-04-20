@@ -46,3 +46,15 @@ let (test_server : process) = Accept ("b", "h", Send ("h", Cst (Int 5), Inact))
 let scoped_test, _, _ = gen_sortings (Composition (test_user, Composition (test_mid, test_server)))
 
 let propagated_test = propagate_sorts scoped_test
+
+let (cond_test_user : process) =  Request ("a", "k", Reception ("k", "x", Conditional (Var "x", Inact, Inact)))
+
+let (cond_test_mid : process) = Accept ("a", "k", Request ("b", "h", Reception ("h", "y", Send ("k", Var "y", Inact))))
+
+let (cond_test_server_fail : process) = Accept ("b", "h", Send ("h", Cst (Int 5), Inact))
+
+let (cond_test_server_ok : process) = Accept ("b", "h", Send ("h", Cst (Bool true), Inact))
+
+let (cond_test_fail : process) = (Composition (cond_test_user, Composition (cond_test_mid, cond_test_server_fail)))
+
+let (cond_test_ok : process) = (Composition (cond_test_user, Composition (cond_test_mid, cond_test_server_ok)))

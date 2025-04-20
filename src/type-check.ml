@@ -193,6 +193,69 @@ let rec combine_types_for_branching (t1 : typ) (t2 : typ) : typ =
   | Reception_t (s1,sub_t1), Reception_t (s2,sub_t2) -> Reception_t (s1,(combine_types_for_branching sub_t1 sub_t2)) (* TODO might need to check both sorts are the same. *)
   | _,_ -> raise (TypeError "incompatible type combination") (* TODO might need more cases in the future *)
 
+let rec conditional_type_equal (t1 : typ) (t2 : typ) : bool = 
+  match t1, t2 with 
+  | Send_t (s1,t1), Send_t (s2,t2) -> (conditional_sort_equal s1 s2) && (conditional_type_equal t1 t2)
+  | Reception_t (s1,t1), Reception_t (s2,t2) -> (conditional_sort_equal s1 s2) && (conditional_type_equal t1 t2)
+  | Branch_t l1, Branch_t l2 -> 
+    begin
+      match List.compare_lengths l1 l2 with
+      | 0 -> 
+        begin
+          let fold_fct = fun acc (l,lt1) -> 
+            match List.assoc_opt l l2 with
+            | Some lt2 -> acc && (conditional_type_equal lt1 lt2)
+            | None -> false
+          in
+          List.fold_left fold_fct true l1
+        end
+      | _ -> false
+    end
+  | Select_t l1, Select_t l2 -> 
+    begin
+      match List.compare_lengths l1 l2 with
+      | 0 -> 
+        begin
+          let fold_fct = fun acc (l,lt1) -> 
+            match List.assoc_opt l l2 with
+            | Some lt2 -> acc && (conditional_type_equal lt1 lt2)
+            | None -> false
+          in
+          List.fold_left fold_fct true l1
+        end
+      | _ -> false
+    end
+  | Inact_t, Inact_t -> true
+  | Closed_t, Closed_t -> true
+  | _, _ -> false
+and conditional_sort_equal (s1 : sort) (s2 : sort) : bool =
+  match s1, s2 with
+  | Nat_s, Nat_s -> true
+  | Bool_s, Bool_s -> true
+  | Var_s x, Var_s y -> true (* TODO might need some sort of environment to map variables with different names used correspondingly *)
+  | _, _ -> false
+
+let conditional_typing_equal (tp1 : typing) (tp2 : typing) : bool =
+  let fold_fct = fun acc (k,t1) ->
+    match List.assoc_opt k tp2 with
+    | Some t2 -> acc && (conditional_type_equal t1 t2)
+    | None -> false
+  in
+  match List.compare_lengths tp1 tp2 with 
+  | 0 -> List.fold_left fold_fct true tp1
+  | _ -> false
+
+let conditional_sorting_equal (sr1 : sorting) (sr2 : sorting) : bool =
+  let fold_fct = fun acc (a,t1) ->
+    match t1, List.assoc_opt a sr2 with
+    | Pair_s (accept1,Unknown_t), Some Pair_s (accept2,Unknown_t) -> acc && (conditional_type_equal accept1 accept2)
+    | Pair_s (Unknown_t,request1), Some Pair_s (Unknown_t,request2) -> acc && (conditional_type_equal request1 request2)
+    | _, _ -> false
+  in
+  match List.compare_lengths sr1 sr2 with 
+  | 0 -> List.fold_left fold_fct true sr2
+  | _ -> false
+
 let rec gen_sortings (input_process : process) : scoped_process * sorting * typing =
   match input_process with 
   | Request (a, k, p) -> 
@@ -383,9 +446,11 @@ let rec gen_sortings (input_process : process) : scoped_process * sorting * typi
   | Catch (k1, k2, p) -> (Scoped_Inact, [], []) (* TODO *)
   | Conditional (e, then_p, else_p) -> 
     begin
-      (* let then_s, then_t = gen_sortings then_p in
-      let else_s, else_t = gen_sortings else_p in *)
-      (Scoped_Inact, [], []) (* TODO Either check here that both sides has same type or combine the outputs and delegate to later. *)
+      let new_then_p, then_s, then_t = gen_sortings then_p in
+      let new_else_p, else_s, else_t = gen_sortings else_p in
+      match (conditional_sorting_equal then_s else_s), (conditional_typing_equal then_t else_t) with
+      | true, true -> Scoped_Conditional (e, new_then_p, new_else_p), then_s, then_t
+      | _, _ -> raise (TypeError "the conditional statement has different types and sortings for both P and Q in \"if e then P else Q\"")
     end
   | Composition (p1, p2) ->
     begin
@@ -638,7 +703,14 @@ let rec propagate_sorts_rec (input_sorting : sorting) (types : typing) (cotypes 
     end
   | Scoped_Throw (k1, k2, p) -> Scoped_Inact, [], [], false (* TODO *)
   | Scoped_Catch (k1, k2, p) -> Scoped_Inact, [], [], false (* TODO *)
-  | Scoped_Conditional (e, then_p, else_p) -> Scoped_Inact, [], [], false
+  | Scoped_Conditional (e, then_p, else_p) -> 
+    begin
+      let new_then_p, then_s, then_t, then_change = propagate_sorts_rec input_sorting types cotypes then_p in
+      let new_else_p, else_s, else_t, else_change = propagate_sorts_rec input_sorting types cotypes else_p in
+      match (conditional_sorting_equal then_s else_s), (conditional_typing_equal then_t else_t) with
+      | true, true -> Scoped_Conditional (e, new_then_p, new_else_p), then_s, then_t, then_change || else_change
+      | _, _ -> raise (TypeError "the conditional statement has different types and sortings for both P and Q in \"if e then P else Q\"")
+    end
   | Scoped_Composition (scope, p1, p2) -> 
     begin
       let new_sorting = scope @ input_sorting in
